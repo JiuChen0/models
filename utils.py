@@ -2,8 +2,9 @@ from config import Config
 import numpy as np
 import tensorflow as tf
 
-config = Config()
+config = Config()   # Configuration
 
+'''Full Connected Layer (LayerNorm -> FullConnect -> Dropout -> Add)'''
 class FullConnect(tf.keras.Sequential):
     def __init__(self, epsilon = config.epsilon, dropoutrate = config.dropoutrate):
         super().__init__()
@@ -18,6 +19,8 @@ class FullConnect(tf.keras.Sequential):
         fc_out = clone_x + x
         return fc_out
 
+'''Multi-head Attention Layer (Encoder MHA & Decoder MHA)'''
+'''the sequence are all the same length so there's no need to build padding mask'''
 class MultiHeadsAtten(tf.keras.Sequential):
     def __init__(self, epsilon = config.epsilon, dropoutrate = config.dropoutrate):
         super().__init__()
@@ -35,7 +38,6 @@ class MultiHeadsAtten(tf.keras.Sequential):
         Q = self.fc_Q(self.norm(Q))
         K = self.fc_K(self.norm(K))
         V = self.fc_V(self.norm(V))
-        # print(K)
         if (Type == 'E'):
             score = self.Encoder_Atten(Q, K, V)
         elif (Type == 'D'):
@@ -46,51 +48,44 @@ class MultiHeadsAtten(tf.keras.Sequential):
         return score
         
     def Encoder_Atten(self, Q, K, V, num_heads=config.num_heads, LAmask=False):
-        # n个样本，每个样本100个attribute，5个头一个头20个attribute
-        # 输入[n,100] -> Q,K,V = [5, n, 20] -> 找样本之间的联系
+        # n samples，100 attribute
+        # input:[n,100] -> Q,K,V = [5, n, 20] -> Attention between Samples
         Q = tf.transpose(tf.reshape(Q,[-1,num_heads,Q.shape[1]/num_heads]),[1,0,2])
         K = tf.transpose(tf.reshape(K,[-1,num_heads,K.shape[1]/num_heads]),[1,0,2])
         V = tf.transpose(tf.reshape(V,[-1,num_heads,V.shape[1]/num_heads]),[1,0,2])
-        # Q,K相乘求每个词注意力分数
+        # Attention score -> [5, n, n]
         score = tf.matmul(Q, tf.transpose(K,perm=[0,2,1]))
-        # score -> [5, n, n]
         if (LAmask == True):
-            # tf.linalg.band_part(input, num_lower下三角保留对角数据数, num_upper上三角保留对角数据数（负数即全保留）
+            # create look ahead mask
             mask = 1 - tf.linalg.band_part(tf.ones((tf.shape(score)[1], tf.shape(score)[1])), -1, 0)    
             score = tf.where(mask, score, -float('inf'))
         score = tf.nn.softmax(score, dim=-1)
-        # 注意力分数×V  [5, n, n]*[5, n, 20] -> [5, n, 20]
+        # score*V  [5, n, n]*[5, n, 20] -> [5, n, 20]
         score = tf.matmul(score, V)
-        # 每个头结果合并 [5, n, 20] -> [n, 100]
+        # concat [5, n, 20] -> [n, 100]
         score = tf.reshape(tf.transpose(score,perm=[1,0,2]),[-1,Q.shape[1]])
         return score
     
     def Decoder_Atten(self, Q, K, V, LAmask, num_heads=config.num_heads):
-        # n个样本，每个样本100个attribute，5个头一个头20个attribute
-        # 输入[n, time, 1] -> [n, time, 100] -> Q,K,V = [n, 5, time, 20] -> 找样本之间的联系
+        # input: [n, time, 100] -> Q,K,V = [n, 5, time, 20] -> Attention in Time
         n, dim = Q.shape[0], Q.shape[2]
         Q = tf.transpose(tf.reshape(Q,[n,-1,num_heads,tf.cast(dim/num_heads,tf.int32)]),[0,2,1,3])
         K = tf.transpose(tf.reshape(K,[n,-1,num_heads,tf.cast(dim/num_heads,tf.int32)]),[0,2,1,3])
         V = tf.transpose(tf.reshape(V,[n,-1,num_heads,tf.cast(dim/num_heads,tf.int32)]),[0,2,1,3])
-        # Q,K相乘求每个词注意力分数
         score = tf.matmul(Q, tf.transpose(K,perm=[0,1,3,2]))
         # score -> [n, 5, time, time]
         if (LAmask == True):
-            # tf.linalg.band_part(input, num_lower下三角保留对角数据数, num_upper上三角保留对角数据数（负数即全保留）
             mask = tf.linalg.band_part(tf.ones((tf.shape(score)[2], tf.shape(score)[2])), -1, 0)
             mask = tf.cast(mask, tf.bool)
-            # print(mask)
             score = tf.where(mask, score, float('-inf'))
-            # print(score)
         score = tf.nn.softmax(score, axis=-1)
-        # 注意力分数×V  [n, 5, time, time]*[n, 5, time, 20] -> [n, 5, time, 20]
         score = tf.matmul(score, V)
-        # 每个头结果合并 [n, 5, time, 20] -> [n, time, 100]
+        # [n, 5, time, 20] -> [n, time, 100]
         score = tf.reshape(tf.transpose(score,perm=[0,2,1,3]),[n,-1,dim])
         return score
 
 
-
+'''Risk (Wasserstein Distance & Prediction Error)'''
 class risk(tf.keras.Sequential):
     def __init__(self):
         pass
