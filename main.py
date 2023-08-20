@@ -1,7 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from models import MyModel_TransLTEE  # Please replace with your actual model
-from config import Config
+from models import MyModel_TransLTEE  
 import time
 from sklearn.model_selection import train_test_split
 
